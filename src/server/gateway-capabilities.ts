@@ -261,6 +261,22 @@ let dashboardTokenCache = ''
 /** Optional bearer token for authenticated gateway endpoints. */
 export const BEARER_TOKEN = process.env.HERMES_API_TOKEN || process.env.CLAUDE_API_TOKEN || ''
 
+// ── Dashboard Basic Auth fallback (2026-07-19) ──────────────────────
+// When the dashboard is headless (Windows, PR #55923) there is no HTML
+// root page to scrape for window.__HERMES_SESSION_TOKEN__.  If the
+// dashboard has basic_auth configured (username + password in Hermes
+// config.yaml) the caller can supply matching env vars and the fallback
+// will use HTTP Basic Auth in place of the token-scraping path.
+// Set both HERMES_DASHBOARD_USERNAME and HERMES_DASHBOARD_PASSWORD in
+// the Workspace .env to activate.
+const DASHBOARD_USERNAME = process.env.HERMES_DASHBOARD_USERNAME || ''
+const DASHBOARD_PASSWORD = process.env.HERMES_DASHBOARD_PASSWORD || ''
+const DASHBOARD_BASIC_AUTH = DASHBOARD_USERNAME && DASHBOARD_PASSWORD
+  ? `Basic ${Buffer.from(`${DASHBOARD_USERNAME}:${DASHBOARD_PASSWORD}`).toString('base64')}`
+  : ''
+
+/** Optional bearer token for authenticated gateway endpoints. */
+
 /**
  * Dashboard API auth uses the ephemeral session token injected into the
  * dashboard root HTML at startup. Do not reuse gateway bearer tokens here and
@@ -291,8 +307,12 @@ export async function fetchDashboardToken(options?: {
     // is broken (500), return empty string so protected API calls degrade
     // gracefully — the caller already handles 401/non-ok via safeJson.
     try {
+      const headers: Record<string, string> = {}
+      if (DASHBOARD_BASIC_AUTH) headers['Authorization'] = DASHBOARD_BASIC_AUTH
+
       const res = await fetch(`${CLAUDE_DASHBOARD_URL}/`, {
         signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        headers,
       })
       if (!res.ok) {
         console.warn(
@@ -335,7 +355,9 @@ export async function dashboardAuthHeaders(options?: {
   force?: boolean
 }): Promise<Record<string, string>> {
   const token = await getDashboardToken(options)
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  if (token) return { Authorization: `Bearer ${token}` }
+  if (DASHBOARD_BASIC_AUTH) return { Authorization: DASHBOARD_BASIC_AUTH }
+  return {}
 }
 
 function withDashboardBase(path: string): string {

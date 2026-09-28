@@ -12,14 +12,14 @@ These features are NOT part of the initial roadmap. Build them AFTER the v4 mock
 
 **What:** Verification doesn't stop at one tsc pass. Loop: run tsc → errors? → send back to agent → fix → re-run. Max 3 iterations before escalating to human review.
 **Why:** Anthropic explicitly identifies this as the pattern that makes agents reliable. Current single-pass fails silently.
-**Where:** `workspace-daemon/src/verification.ts` + `checkpoint-builder.ts`
+**Where:** Historical daemon implementation removed in commit `82c3f709`.
 **Pattern source:** Anthropic Skills Guide — "Iterative Refinement" design pattern
 
 ### 2. Agent Handoffs (Context Passing Between Agents)
 
 **What:** When one agent finishes a wave, it passes structured context (git diff, error log, what it built, what it skipped) to the next agent. No more blind starts.
 **Why:** Current agents start each task cold. Handoffs are first-class in OpenAI Agents SDK — explicit control transfer with context. This is what keeps overnight runs coherent.
-**Where:** New `workspace-daemon/src/handoff.ts`, update adapter interfaces
+**Where:** Historical daemon implementation removed in commit `82c3f709`.
 **Pattern source:** OpenAI Agents SDK — "Handoffs" primitive
 
 ### 3. Specialized Agent Roles
@@ -32,7 +32,7 @@ These features are NOT part of the initial roadmap. Build them AFTER the v4 mock
 - **Validator** — runs tsc, tests, reviews diff
 - **Deployer** — git ops, PR creation, notifications
   **Why:** The "App Factory" screenshot runs specialized roles. Generic agents miss domain context.
-  **Where:** `workspace-daemon/src/adapters/` — one file per role
+  **Where:** Historical daemon implementation removed in commit `82c3f709`.
   **Pattern source:** Anthropic Skills — "Domain-specific intelligence" + App Factory pattern
 
 ---
@@ -43,14 +43,14 @@ These features are NOT part of the initial roadmap. Build them AFTER the v4 mock
 
 **What:** Run tsc in watch mode alongside Codex, not just after. Flag errors in real-time without waiting for checkpoint.
 **Why:** OpenAI SDK runs guardrails in parallel with the agent — catches issues without blocking the main flow.
-**Where:** New process spawned alongside agent in `agent-runner.ts`
+**Where:** Historical daemon implementation removed in commit `82c3f709`.
 **Pattern source:** OpenAI Agents SDK — "Guardrails" primitive
 
 ### 5. Rollback on Checkpoint Rejection
 
 **What:** When a checkpoint is rejected, auto-revert to pre-task git state rather than leaving dirty code in tree.
 **Why:** Currently a rejection leaves broken code that the next agent inherits.
-**Where:** `workspace-daemon/src/git-ops.ts` — add `revertToCheckpoint()` method
+**Where:** Historical daemon implementation removed in commit `82c3f709`.
 
 ### 6. Context-Aware Tool Selection
 

@@ -454,11 +454,10 @@
 - Spawns uvicorn with health polling (15 attempts, 1s interval)
 - Reads `~/.hermes/.env` for agent configuration
 
-### 5.8 Workspace Daemon (Optional)
+### 5.8 Workspace Daemon (Retired)
 
-- Separate workspace daemon process on port 3099
-- Auto-restart with exponential backoff (max 20 retries)
-- Provides workspace-level APIs (checkpoints, agents, etc.)
+The former workspace daemon and its port 3099 service were intentionally
+removed in commit `82c3f709`. The current Workspace runs without that daemon.
 
 ---
 

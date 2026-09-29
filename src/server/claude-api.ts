@@ -376,17 +376,31 @@ export async function streamChat(
   body: {
     message: string
     model?: string
+    provider?: string
     system_message?: string
     attachments?: Array<Record<string, unknown>>
   },
   opts: StreamChatOptions,
 ): Promise<void> {
+  if (body.provider && !body.model?.startsWith(`${body.provider}/`)) {
+    throw new Error('Selected provider does not match model; refusing an unlocked turn')
+  }
   const res = await fetch(
     `${CLAUDE_API}/api/sessions/${sessionId}/chat/stream`,
     {
       method: 'POST',
       headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        ...(body.provider && body.model?.startsWith(`${body.provider}/`)
+          ? {
+              model: body.model.slice(body.provider.length + 1),
+              provider: body.provider,
+              require_model_lock: true,
+              persist_model_lock: false,
+            }
+          : { provider: undefined }),
+      }),
       signal: opts.signal,
     },
   )
@@ -451,12 +465,14 @@ export async function streamChat(
             dataStr.length > 4000 ? dataStr.slice(0, 4000) + '...[trunc]' : dataStr
           toolDebugStream.write(`data: ${trimmed}\n\n`)
         }
+        let data: Record<string, unknown>
         try {
-          const data = JSON.parse(dataStr) as Record<string, unknown>
-          await opts.onEvent({ event: currentEvent || 'message', data })
+          data = JSON.parse(dataStr) as Record<string, unknown>
         } catch {
-          // skip malformed JSON
+          // Skip malformed JSON; do not swallow the stream handler's errors.
+          continue
         }
+        await opts.onEvent({ event: currentEvent || 'message', data })
       }
     }
   }

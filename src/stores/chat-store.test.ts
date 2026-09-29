@@ -68,3 +68,34 @@ describe('chat-store history merge ordering', () => {
     ])
   })
 })
+
+describe('active send Stop identity', () => {
+  it('never clears B\'s new-chat waiting marker while A resolves', () => {
+    const store = useChatStore.getState()
+    try {
+      store.setSessionWaiting('new', null, 'request-B')
+      store.clearSessionWaitingIfRequestId('new', 'request-A')
+      expect(useChatStore.getState().waitingSessionMeta.new?.requestId).toBe('request-B')
+      store.clearSessionWaitingIfRequestId('new', 'request-B')
+      expect(useChatStore.getState().waitingSessionMeta.new).toBeUndefined()
+    } finally {
+      store.clearSessionWaiting('new')
+    }
+  })
+  it('keeps A\'s request ID while B runs and while A\'s run ID arrives later', () => {
+    const store = useChatStore.getState()
+    try {
+      store.setSessionWaiting('stop-A', null, 'request-A')
+      store.setSessionWaiting('stop-B', null, 'request-B')
+      expect(useChatStore.getState().waitingSessionMeta['stop-A']?.requestId).toBe('request-A')
+      store.setSessionWaiting('stop-A', 'run-A')
+      expect(useChatStore.getState().waitingSessionMeta['stop-A']).toMatchObject({
+        runId: 'run-A', requestId: 'request-A',
+      })
+      expect(useChatStore.getState().waitingSessionMeta['stop-B']?.requestId).toBe('request-B')
+    } finally {
+      store.clearSessionWaiting('stop-A')
+      store.clearSessionWaiting('stop-B')
+    }
+  })
+})

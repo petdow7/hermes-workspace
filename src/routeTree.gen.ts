@@ -169,6 +169,7 @@ import { Route as ApiMcpHubSourcesIdRouteImport } from './routes/api/mcp/hub-sou
 import { Route as ApiMcpNameLogsRouteImport } from './routes/api/mcp/$name.logs'
 import { Route as ApiHermesworldReservationsConfirmRouteImport } from './routes/api/hermesworld/reservations/confirm'
 import { Route as ApiRunsSessionKeyRunIdAbandonRouteImport } from './routes/api/runs/$sessionKey.$runId.abandon'
+import { Route as ApiRunsSessionKeyRequestIdStopRouteImport } from './routes/api/runs/$sessionKey.$requestId.stop'
 
 const WorldRoute = WorldRouteImport.update({
   id: '/world',
@@ -978,6 +979,12 @@ const ApiRunsSessionKeyRunIdAbandonRoute =
     path: '/api/runs/$sessionKey/$runId/abandon',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiRunsSessionKeyRequestIdStopRoute =
+  ApiRunsSessionKeyRequestIdStopRouteImport.update({
+    id: '/api/runs/$sessionKey/$requestId/stop',
+    path: '/api/runs/$sessionKey/$requestId/stop',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -1139,6 +1146,7 @@ export interface FileRoutesByFullPath {
   '/api/mcp/hub-sources/$id': typeof ApiMcpHubSourcesIdRoute
   '/api/sessions/$sessionKey/active-run': typeof ApiSessionsSessionKeyActiveRunRoute
   '/api/sessions/$sessionKey/status': typeof ApiSessionsSessionKeyStatusRoute
+  '/api/runs/$sessionKey/$requestId/stop': typeof ApiRunsSessionKeyRequestIdStopRoute
   '/api/runs/$sessionKey/$runId/abandon': typeof ApiRunsSessionKeyRunIdAbandonRoute
 }
 export interface FileRoutesByTo {
@@ -1300,6 +1308,7 @@ export interface FileRoutesByTo {
   '/api/mcp/hub-sources/$id': typeof ApiMcpHubSourcesIdRoute
   '/api/sessions/$sessionKey/active-run': typeof ApiSessionsSessionKeyActiveRunRoute
   '/api/sessions/$sessionKey/status': typeof ApiSessionsSessionKeyStatusRoute
+  '/api/runs/$sessionKey/$requestId/stop': typeof ApiRunsSessionKeyRequestIdStopRoute
   '/api/runs/$sessionKey/$runId/abandon': typeof ApiRunsSessionKeyRunIdAbandonRoute
 }
 export interface FileRoutesById {
@@ -1463,6 +1472,7 @@ export interface FileRoutesById {
   '/api/mcp/hub-sources/$id': typeof ApiMcpHubSourcesIdRoute
   '/api/sessions/$sessionKey/active-run': typeof ApiSessionsSessionKeyActiveRunRoute
   '/api/sessions/$sessionKey/status': typeof ApiSessionsSessionKeyStatusRoute
+  '/api/runs/$sessionKey/$requestId/stop': typeof ApiRunsSessionKeyRequestIdStopRoute
   '/api/runs/$sessionKey/$runId/abandon': typeof ApiRunsSessionKeyRunIdAbandonRoute
 }
 export interface FileRouteTypes {
@@ -1627,6 +1637,7 @@ export interface FileRouteTypes {
     | '/api/mcp/hub-sources/$id'
     | '/api/sessions/$sessionKey/active-run'
     | '/api/sessions/$sessionKey/status'
+    | '/api/runs/$sessionKey/$requestId/stop'
     | '/api/runs/$sessionKey/$runId/abandon'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -1788,6 +1799,7 @@ export interface FileRouteTypes {
     | '/api/mcp/hub-sources/$id'
     | '/api/sessions/$sessionKey/active-run'
     | '/api/sessions/$sessionKey/status'
+    | '/api/runs/$sessionKey/$requestId/stop'
     | '/api/runs/$sessionKey/$runId/abandon'
   id:
     | '__root__'
@@ -1950,6 +1962,7 @@ export interface FileRouteTypes {
     | '/api/mcp/hub-sources/$id'
     | '/api/sessions/$sessionKey/active-run'
     | '/api/sessions/$sessionKey/status'
+    | '/api/runs/$sessionKey/$requestId/stop'
     | '/api/runs/$sessionKey/$runId/abandon'
   fileRoutesById: FileRoutesById
 }
@@ -2082,6 +2095,7 @@ export interface RootRouteChildren {
   ApiUpdateAgentRoute: typeof ApiUpdateAgentRoute
   ApiUpdateStatusRoute: typeof ApiUpdateStatusRoute
   ApiUpdateWorkspaceRoute: typeof ApiUpdateWorkspaceRoute
+  ApiRunsSessionKeyRequestIdStopRoute: typeof ApiRunsSessionKeyRequestIdStopRoute
   ApiRunsSessionKeyRunIdAbandonRoute: typeof ApiRunsSessionKeyRunIdAbandonRoute
 }
 
@@ -3207,6 +3221,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRunsSessionKeyRunIdAbandonRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/runs/$sessionKey/$requestId/stop': {
+      id: '/api/runs/$sessionKey/$requestId/stop'
+      path: '/api/runs/$sessionKey/$requestId/stop'
+      fullPath: '/api/runs/$sessionKey/$requestId/stop'
+      preLoaderRoute: typeof ApiRunsSessionKeyRequestIdStopRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -3551,6 +3572,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiUpdateAgentRoute: ApiUpdateAgentRoute,
   ApiUpdateStatusRoute: ApiUpdateStatusRoute,
   ApiUpdateWorkspaceRoute: ApiUpdateWorkspaceRoute,
+  ApiRunsSessionKeyRequestIdStopRoute: ApiRunsSessionKeyRequestIdStopRoute,
   ApiRunsSessionKeyRunIdAbandonRoute: ApiRunsSessionKeyRunIdAbandonRoute,
 }
 export const routeTree = rootRouteImport

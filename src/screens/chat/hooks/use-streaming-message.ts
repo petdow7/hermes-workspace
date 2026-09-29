@@ -803,6 +803,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
       attachments?: Array<ChatAttachment>
       idempotencyKey?: string
       model?: string
+      provider?: string
     }) => {
       if (eventSourceRef.current) {
         // Preserve in-progress response as a partial message before aborting
@@ -872,6 +873,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
             attachments: params.attachments,
             idempotencyKey: params.idempotencyKey ?? crypto.randomUUID(),
             model: params.model || undefined,
+            provider: params.provider || undefined,
             locale:
               typeof window !== 'undefined'
                 ? localStorage.getItem('hermes-workspace-locale') || 'en'
@@ -880,6 +882,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
           signal: abortController.signal,
         })
 
+        if (streamGenerationRef.current !== myGeneration) return
         if (!response.ok) {
           const errorText = await response.text()
           throw new Error(errorText || 'Stream request failed')
@@ -988,6 +991,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
         }
 
         const lifecyclePhase = lifecyclePhaseRef.current as StreamLifecyclePhase
+        if (streamGenerationRef.current !== myGeneration) return
         if (!finishedRef.current && lifecyclePhase !== 'handoff') {
           // If the stream ended cleanly (no 'done' event) but we never received
           // any response text, treat it as a failure rather than a successful
@@ -1006,6 +1010,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
           }
         }
       } catch (err) {
+        if (streamGenerationRef.current !== myGeneration) return
         if ((err as Error).name === 'AbortError') {
           eventSourceRef.current = null
           clearHandoffTimer()
@@ -1041,22 +1046,15 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
   )
 
   const cancelStreaming = useCallback(() => {
-    if (
-      lifecyclePhaseRef.current === 'accepted' ||
-      lifecyclePhaseRef.current === 'active' ||
-      lifecyclePhaseRef.current === 'handoff'
-    ) {
-      transitionToHandoff()
-    }
-    if (eventSourceRef.current) {
-      eventSourceRef.current.abort()
-      eventSourceRef.current = null
-    }
-    finishedRef.current = lifecyclePhaseRef.current !== 'handoff'
-    if (lifecyclePhaseRef.current !== 'handoff') {
-      resetActiveStreamState()
-    }
-  }, [resetActiveStreamState, transitionToHandoff])
+    // This only detaches the browser. The server continues and persists the
+    // answer for this session; explicit Stop has its own request endpoint.
+    streamGenerationRef.current += 1
+    const reader = eventSourceRef.current
+    eventSourceRef.current = null
+    reader?.abort()
+    finishedRef.current = true
+    resetActiveStreamState()
+  }, [resetActiveStreamState])
 
   const resetStreaming = useCallback(() => {
     cancelStreaming()

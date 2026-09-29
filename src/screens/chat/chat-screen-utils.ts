@@ -10,6 +10,45 @@ export type ResponseWaitSnapshot = {
   lastAssistantId: string | null
 }
 
+export function createPendingNewChatModelKey(instanceId: string): string {
+  return `__workspace_pending_new_chat_model__:${instanceId}`
+}
+
+export function resolveSessionModel(
+  sessionKey: string | undefined,
+  gatewayModel: string,
+  choices: Record<string, string>,
+): string {
+  return (sessionKey && choices[sessionKey]) || gatewayModel
+}
+
+export function resolveModelChoiceKey(model: string, provider?: string): string {
+  const id = model.trim()
+  const selectedProvider = provider?.trim()
+  if (!id || !selectedProvider || id.includes('/')) return id
+  return `${selectedProvider}/${id}`
+}
+
+export function shouldBlockUnresolvedModelSelection(
+  selectedModel: string | undefined,
+  currentModel: string,
+  catalog: Array<{ id: string; provider?: string }>,
+): boolean {
+  if (!selectedModel) return false
+  return selectedModel !== currentModel ||
+    !catalog.some((entry) => entry.id === selectedModel)
+}
+
+export function resolveSelectedModelProvider(
+  model: string,
+  catalog: Array<{ id: string; provider?: string }>,
+): string | undefined {
+  const entry = catalog.find((candidate) => candidate.id === model)
+  return entry?.provider && model.startsWith(`${entry.provider}/`)
+    ? entry.provider
+    : undefined
+}
+
 export function isTerminalActiveRunStatus(status: unknown): boolean {
   return (
     typeof status === 'string' &&

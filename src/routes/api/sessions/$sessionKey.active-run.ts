@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { json } from '@tanstack/react-start'
 import { isAuthenticated } from '../../../server/auth-middleware'
 import { getActiveRunForSession } from '../../../server/run-store'
+import { getInterruptibleRequestForSession } from '../../../server/send-run-tracker'
 
 export const Route = createFileRoute('/api/sessions/$sessionKey/active-run')({
   server: {
@@ -21,7 +22,7 @@ export const Route = createFileRoute('/api/sessions/$sessionKey/active-run')({
 
         try {
           const run = await getActiveRunForSession(sessionKey)
-          return json({ ok: true, run })
+          return json({ ok: true, run, requestId: getInterruptibleRequestForSession(sessionKey) })
         } catch (err) {
           return json(
             {

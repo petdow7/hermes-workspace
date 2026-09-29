@@ -85,6 +85,7 @@ export type OpenAICompatMessage = {
 
 export type OpenAIChatOptions = {
   model?: string
+  provider?: string
   stream?: boolean
   temperature?: number
   signal?: AbortSignal
@@ -95,6 +96,8 @@ export type OpenAIChatOptions = {
 
 type OpenAIChatRequest = {
   model: string
+  provider?: string
+  require_model_lock?: boolean
   messages: Array<{
     role: string
     content: string | Array<OpenAICompatContentPart>
@@ -119,8 +122,13 @@ export async function buildRequestBody(
     options.model && options.model !== 'default'
       ? options.model
       : await getDefaultModel()
+  const provider = options.baseUrl ? undefined : options.provider
+  if (provider && !model.startsWith(`${provider}/`)) {
+    throw new Error('Selected provider does not match model; refusing an unlocked turn')
+  }
   return {
-    model,
+    model: provider ? model.slice(provider.length + 1) : model,
+    ...(provider ? { provider, require_model_lock: true } : {}),
     messages,
     stream: options.stream === true,
     temperature: options.temperature,
@@ -247,7 +255,16 @@ export async function* parseOpenAIStream(
                 reasoning?: string | null
                 reasoning_content?: string | null
               }
+              finish_reason?: string | null
             }>
+            error?: { message?: string } | string
+          }
+          if (parsed.error) {
+            const message = typeof parsed.error === 'string' ? parsed.error : parsed.error.message
+            throw new Error(`Hermes stream failed; ${message || 'selected model was not confirmed'}`)
+          }
+          if (parsed.choices?.some((choice) => choice.finish_reason === 'error')) {
+            throw new Error('Hermes stream failed; selected model was not confirmed')
           }
           const d = parsed.choices?.[0]?.delta
           const content = d?.content || ''
@@ -256,8 +273,9 @@ export async function* parseOpenAIStream(
           if (content) yield { type: 'content' as const, text: content }
           else if (reasoning)
             yield { type: 'reasoning' as const, text: reasoning }
-        } catch {
-          // Ignore malformed chunks.
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Hermes stream failed;')) throw err
+          // Ignore malformed chunks, not confirmed gateway failures.
         }
       }
 

@@ -10,6 +10,8 @@ const { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, readdirSyn
   readdirSync: vi.fn().mockReturnValue([]),
 }))
 
+const { dashboardFetch } = vi.hoisted(() => ({ dashboardFetch: vi.fn() }))
+
 vi.mock('node:fs', () => ({
   default: { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, readdirSync },
   existsSync,
@@ -39,6 +41,7 @@ vi.mock('../../../server/auth-middleware', () => ({
 vi.mock('../../../server/gateway-capabilities', () => ({
   BEARER_TOKEN: '',
   CLAUDE_API: 'http://127.0.0.1:8642',
+  dashboardFetch,
 }))
 
 vi.mock('../../../server/claude-api', () => ({
@@ -54,11 +57,31 @@ vi.mock('../../../server/local-provider-discovery', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  dashboardFetch.mockResolvedValue(new Response('{}', { status: 503 }))
   delete process.env.HERMES_HOME
   delete process.env.CLAUDE_HOME
 })
 
 describe('models route', () => {
+  it('serves authenticated Dashboard choices plus configured custom chat models', async () => {
+    process.env.HERMES_HOME = '/mock/hermes'
+    existsSync.mockImplementation((p: string) => p.replaceAll('\\', '/') === '/mock/hermes/config.yaml')
+    readFileSync.mockImplementation((p: string) => p.replaceAll('\\', '/') === '/mock/hermes/config.yaml'
+      ? 'custom_providers:\n  - name: fun-codex\n    models: [gpt-5.5, gpt-image-2]\n'
+      : '')
+    dashboardFetch.mockResolvedValue(new Response(JSON.stringify({ providers: [
+      { slug: 'openai-codex', authenticated: true, models: ['gpt-6-sol'] },
+      { slug: 'moa', authenticated: true, models: ['default'] },
+    ] }), { status: 200 }))
+    const get = await getHandler()
+    const res = await get({ request: new Request('http://localhost/api/models') })
+    const body = await res.json()
+    expect(dashboardFetch).toHaveBeenCalledWith('/api/model/options', expect.any(Object))
+    expect(body.models.map((m: { id: string }) => m.id)).toEqual([
+      'openai-codex/gpt-6-sol', 'custom:fun-codex/gpt-5.5',
+    ])
+    expect(body.source).toContain('dashboard')
+  })
   async function importModels() {
     vi.resetModules()
     const mod = await import('../models')
@@ -89,11 +112,11 @@ describe('models route', () => {
     const configYaml = 'model: jarvis-model\nprovider: nous\n'
     const modelsJson = '[{"model":"x","provider":"y"}]'
     existsSync.mockImplementation((p: string) => {
-      return p === `${envHome}/models.json` || p === `${envHome}/config.yaml`
+      return p.replaceAll('\\', '/') === `${envHome}/models.json` || p.replaceAll('\\', '/') === `${envHome}/config.yaml`
     })
     readFileSync.mockImplementation((p: string) => {
-      if (p === `${envHome}/config.yaml`) return configYaml
-      if (p === `${envHome}/models.json`) return modelsJson
+      if (p.replaceAll('\\', '/') === `${envHome}/config.yaml`) return configYaml
+      if (p.replaceAll('\\', '/') === `${envHome}/models.json`) return modelsJson
       return ''
     })
 
@@ -112,9 +135,9 @@ describe('models route', () => {
     process.env.CLAUDE_HOME = envHome
 
     const configYaml = 'model:\n  default: nest-model\n  provider: anthropic\n'
-    existsSync.mockImplementation((p: string) => p === `${envHome}/config.yaml`)
+    existsSync.mockImplementation((p: string) => p.replaceAll('\\', '/') === `${envHome}/config.yaml`)
     readFileSync.mockImplementation((p: string) => {
-      if (p === `${envHome}/config.yaml`) return configYaml
+      if (p.replaceAll('\\', '/') === `${envHome}/config.yaml`) return configYaml
       return ''
     })
 

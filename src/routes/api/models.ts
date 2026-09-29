@@ -9,7 +9,7 @@ import {
   ensureGatewayProbed,
   getGatewayCapabilities,
 } from '../../server/claude-api'
-import { BEARER_TOKEN, CLAUDE_API } from '../../server/gateway-capabilities'
+import { BEARER_TOKEN, CLAUDE_API, dashboardFetch } from '../../server/gateway-capabilities'
 import {
   ensureDiscovery,
   ensureProviderInConfig,
@@ -37,7 +37,51 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function normalizeModel(entry: unknown): ModelEntry | null {
+export function normalizeDashboardModelOptions(payload: unknown): Array<ModelEntry> {
+  const groups = asRecord(payload).providers
+  if (!Array.isArray(groups)) return []
+  const models: Array<ModelEntry> = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    const record = asRecord(group)
+    const provider = readString(record.slug)
+    // Ollama uses Workspace's direct local endpoint, not the gateway custom-provider route.
+    if (!provider || provider === 'moa' || provider === 'custom:ollama' || record.authenticated !== true || !Array.isArray(record.models)) continue
+    for (const value of record.models) {
+      const raw = readString(value)
+      if (!raw || /(?:^|[\/\-_])(image|audio|embedding|embeddings|embed|tts|whisper|dall-e|sora)(?:$|[\/\-_0-9])/i.test(raw)) continue
+      const model = raw.startsWith(`${provider}/`) ? raw.slice(provider.length + 1) : raw
+      const id = `${provider}/${model}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      models.push({ id, name: model, provider, source: 'dashboard' })
+    }
+  }
+  return models
+}
+
+export function normalizeCustomProviderModels(value: unknown): Array<ModelEntry> {
+  if (!Array.isArray(value)) return []
+  const result: Array<ModelEntry> = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    const block = asRecord(item)
+    const name = readString(block.name)
+    if (!name || name === 'ollama' || !Array.isArray(block.models)) continue
+    const provider = `custom:${name}`
+    for (const entry of block.models) {
+      const model = readString(entry)
+      if (!model || /(?:^|[\/\-_])(image|audio|embedding|embeddings|embed|tts|whisper|dall-e|sora|realtime|transcribe|moderation)(?:$|[\/\-_0-9])/i.test(model)) continue
+      const id = `${provider}/${model}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      result.push({ id, name: model, provider, source: 'config.yaml' })
+    }
+  }
+  return result
+}
+
+function normalizeModel(entry: unknown): (ModelEntry & { id: string }) | null {
   if (typeof entry === 'string') {
     const id = entry.trim()
     if (!id) return null
@@ -66,7 +110,7 @@ function normalizeModel(entry: unknown): ModelEntry | null {
   }
 }
 
-export function mergeModelEntries(...sources: Array<Array<ModelEntry>>): Array<ModelEntry> {
+export function mergeModelEntries(...sources: Array<Array<ModelEntry | string>>): Array<ModelEntry> {
   const merged: Array<ModelEntry> = []
   const seen = new Set<string>()
 
@@ -288,7 +332,7 @@ async function fetchConfiguredLiveModels(): Promise<Array<ModelEntry>> {
             : []
         models = rawModels
           .map(normalizeModel)
-          .filter((entry): entry is ModelEntry => entry !== null)
+          .filter((entry): entry is ModelEntry & { id: string } => entry !== null)
           .map((entry) => ({
             ...entry,
             provider: readString(entry.provider) || endpoint.provider,
@@ -402,7 +446,7 @@ async function fetchClaudeModels(): Promise<Array<ModelEntry>> {
       : []
   return rawModels
     .map(normalizeModel)
-    .filter((e): e is ModelEntry => e !== null)
+    .filter((e): e is ModelEntry & { id: string } => e !== null)
 }
 
 export const Route = createFileRoute('/api/models')({
@@ -415,6 +459,39 @@ export const Route = createFileRoute('/api/models')({
         await ensureGatewayProbed()
 
         try {
+          // The dashboard exposes the active profile's authenticated providers.
+          // Keep its credentials server-side; never return them to the browser.
+          try {
+            const response = await dashboardFetch('/api/model/options', {
+              signal: AbortSignal.timeout(4_000),
+            })
+            if (response.ok) {
+              let dashboardModels = normalizeDashboardModelOptions(await response.json())
+              if (dashboardModels.length > 0) {
+                if (fs.existsSync(CONFIG_PATH)) {
+                  const config = asRecord(YAML.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')))
+                  dashboardModels = mergeModelEntries(
+                    dashboardModels,
+                    normalizeCustomProviderModels(config.custom_providers),
+                  )
+                }
+                await ensureDiscovery()
+                dashboardModels = mergeModelEntries(dashboardModels, getDiscoveredModels())
+                const configuredProviders = Array.from(new Set(dashboardModels.map((m) => m.provider).filter(Boolean)))
+                return json({
+                  ok: true,
+                  object: 'list',
+                  data: dashboardModels,
+                  models: dashboardModels,
+                  configuredProviders,
+                  source: 'dashboard+custom+local',
+                  ...readStreamTimeouts(),
+                })
+              }
+            }
+          } catch (error) {
+            console.warn('[models] Dashboard catalog unavailable; using legacy sources', error)
+          }
           // Primary: read user-configured models from ~/.hermes/models.json
           let models = readClaudeModelsJson()
           let source = 'models.json'

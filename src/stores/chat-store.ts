@@ -133,11 +133,12 @@ type ChatState = {
 
   /** Sessions currently waiting for a response — survives component unmount */
   waitingSessionKeys: Set<string>
-  waitingSessionMeta: Record<string, { since: number; runId: string | null }>
+  waitingSessionMeta: Record<string, { since: number; runId: string | null; requestId?: string | null }>
   /** Mark a session as waiting for a response */
-  setSessionWaiting: (sessionKey: string, runId?: string | null) => void
+  setSessionWaiting: (sessionKey: string, runId?: string | null, requestId?: string | null) => void
   /** Clear waiting state for a session */
   clearSessionWaiting: (sessionKey: string) => void
+  clearSessionWaitingIfRequestId: (sessionKey: string, requestId: string) => void
   /** Check if a session is waiting for a response */
   isSessionWaiting: (sessionKey: string) => boolean
 
@@ -251,7 +252,7 @@ const WAITING_STORAGE_PREFIX = 'claude_waiting_'
 
 function persistWaitingState(
   sessionKey: string,
-  meta: { since: number; runId: string | null },
+  meta: { since: number; runId: string | null; requestId?: string | null },
 ): void {
   if (typeof sessionStorage === 'undefined') return
   sessionStorage.setItem(
@@ -267,10 +268,10 @@ function removeWaitingState(sessionKey: string): void {
 
 function restoreWaitingSessions(): {
   keys: Set<string>
-  meta: Record<string, { since: number; runId: string | null }>
+  meta: Record<string, { since: number; runId: string | null; requestId?: string | null }>
 } {
   const keys = new Set<string>()
-  const meta: Record<string, { since: number; runId: string | null }> = {}
+  const meta: Record<string, { since: number; runId: string | null; requestId?: string | null }> = {}
   if (typeof sessionStorage === 'undefined') return { keys, meta }
 
   const now = Date.now()
@@ -288,6 +289,7 @@ function restoreWaitingSessions(): {
         meta[sessionKey] = {
           since: parsed.since,
           runId: typeof parsed.runId === 'string' ? parsed.runId : null,
+          requestId: typeof parsed.requestId === 'string' ? parsed.requestId : null,
         }
       } else {
         sessionStorage.removeItem(storageKey)
@@ -669,10 +671,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return get().sendStreamRunIds.has(runId)
   },
 
-  setSessionWaiting: (sessionKey, runId) => {
+  setSessionWaiting: (sessionKey, runId, requestId) => {
+    const waitingMeta = get().waitingSessionMeta
+    const previous = Object.hasOwn(waitingMeta, sessionKey)
+      ? waitingMeta[sessionKey]
+      : undefined
     const meta = {
-      since: get().waitingSessionMeta[sessionKey]?.since ?? Date.now(),
-      runId: runId ?? null,
+      since: previous?.since ?? Date.now(),
+      runId: runId === undefined ? previous?.runId ?? null : runId,
+      requestId: requestId === undefined ? previous?.requestId ?? null : requestId,
     }
     const nextKeys = new Set(get().waitingSessionKeys)
     nextKeys.add(sessionKey)
@@ -687,6 +694,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { [sessionKey]: _, ...nextMeta } = get().waitingSessionMeta
     removeWaitingState(sessionKey)
     set({ waitingSessionKeys: nextKeys, waitingSessionMeta: nextMeta })
+  },
+
+  clearSessionWaitingIfRequestId: (sessionKey, requestId) => {
+    if (Object.hasOwn(get().waitingSessionMeta, sessionKey) &&
+      get().waitingSessionMeta[sessionKey].requestId === requestId) {
+      get().clearSessionWaiting(sessionKey)
+    }
   },
 
   isSessionWaiting: (sessionKey) => {

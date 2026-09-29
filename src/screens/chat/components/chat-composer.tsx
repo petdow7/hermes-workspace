@@ -49,6 +49,7 @@ import { useSettings } from '@/hooks/use-settings'
 import { MOBILE_TAB_BAR_OFFSET } from '@/components/mobile-tab-bar'
 import { useWorkspaceStore } from '@/stores/workspace-store'
 import { useSessionModelStore } from '@/stores/session-model-store'
+import { resolveModelChoiceKey } from '../chat-screen-utils'
 import { Button } from '@/components/ui/button'
 import { usePinnedModels } from '@/hooks/use-pinned-models'
 // import { ModeSelector } from '@/components/mode-selector'
@@ -85,6 +86,7 @@ type ChatComposerProps = {
   isLoading: boolean
   disabled: boolean
   sessionKey?: string
+  modelSessionKey?: string
   wrapperRef?: Ref<HTMLDivElement>
   composerRef?: Ref<ChatComposerHandle>
   focusKey?: string
@@ -555,16 +557,6 @@ function readText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function getResolvedModelKey(model: string, provider?: string): string {
-  const normalizedModel = model.trim()
-  const normalizedProvider = typeof provider === 'string' ? provider.trim() : ''
-
-  if (!normalizedModel) return ''
-  if (!normalizedProvider) return normalizedModel
-  if (normalizedModel.startsWith(`${normalizedProvider}/`))
-    return normalizedModel
-  return `${normalizedProvider}/${normalizedModel}`
-}
 
 /**
  * Checks whether a model entry matches the current model string.
@@ -871,6 +863,7 @@ function ChatComposerComponent({
   isLoading,
   disabled,
   sessionKey,
+  modelSessionKey,
   wrapperRef,
   composerRef,
   focusKey,
@@ -1108,7 +1101,7 @@ function ChatComposerComponent({
   // Replaces an earlier flow that PATCHed ~/.hermes/config.yaml — that path
   // 404s and would clobber the global default for every channel anyway.
   const persistedSessionModel = useSessionModelStore((s) =>
-    s.getModel(sessionKey),
+    s.getModel(modelSessionKey || sessionKey),
   )
   const setPersistedSessionModel = useSessionModelStore((s) => s.setModel)
 
@@ -1122,9 +1115,10 @@ function ChatComposerComponent({
     function handleModelSelect(nextModel: string, provider?: string) {
       const model = nextModel.trim()
       if (!model) return
+      const modelKey = modelSessionKey || sessionKey
       const normalizedSessionKey =
-        typeof sessionKey === 'string' && sessionKey.trim().length > 0
-          ? sessionKey.trim()
+        typeof modelKey === 'string' && modelKey.trim().length > 0
+          ? modelKey.trim()
           : undefined
       if (
         shouldBlockZeroForkModelSwitch(
@@ -1137,7 +1131,7 @@ function ChatComposerComponent({
         return
       }
       setModelNotice(null)
-      const resolved = getResolvedModelKey(model, provider)
+      const resolved = resolveModelChoiceKey(model, provider)
       // Per-session, browser-local persistence. No global config write —
       // picking a model here only affects this chat. The actual model is
       // passed on each request via the chat-completion `model` field.
@@ -1149,6 +1143,7 @@ function ChatComposerComponent({
     [
       gatewayModeQuery.data,
       sessionKey,
+      modelSessionKey,
       setPersistedSessionModel,
       zeroForkModelInfoFlags,
     ],

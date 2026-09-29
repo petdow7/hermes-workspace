@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useChatStore } from '../../../stores/chat-store'
 
 type ActiveRunStatus =
@@ -11,6 +11,7 @@ type ActiveRunStatus =
 
 type ActiveRunResponse = {
   ok: boolean
+  requestId?: string | null
   run: {
     runId: string
     status: ActiveRunStatus
@@ -52,7 +53,6 @@ export function useActiveRunCheck({
   enabled: boolean
   onCheckComplete?: () => void
 }): void {
-  const hasCheckedRef = useRef(false)
   const sessionKeyRef = useRef(sessionKey)
   sessionKeyRef.current = sessionKey
   const onCompleteRef = useRef(onCheckComplete)
@@ -60,8 +60,6 @@ export function useActiveRunCheck({
 
   useEffect(() => {
     if (!enabled || !sessionKey || sessionKey === 'new') return
-    if (hasCheckedRef.current) return
-    hasCheckedRef.current = true
 
     const controller = new AbortController()
     let settled = false
@@ -97,7 +95,13 @@ export function useActiveRunCheck({
 
         const store = useChatStore.getState()
         if (data.run && ACTIVE_STATUSES.has(data.run.status)) {
-          store.setSessionWaiting(sessionKey, data.run.runId)
+          if (data.requestId === undefined) {
+            store.setSessionWaiting(sessionKey, data.run.runId)
+          } else {
+            store.setSessionWaiting(sessionKey, data.run.runId, data.requestId)
+          }
+        } else if (data.requestId) {
+          store.setSessionWaiting(sessionKey, null, data.requestId)
         } else if (store.isSessionWaiting(sessionKey)) {
           // Server says run is done but we still have stale waiting state
           store.clearSessionWaiting(sessionKey)
@@ -121,9 +125,4 @@ export function useActiveRunCheck({
       controller.abort()
     }
   }, [sessionKey, enabled])
-
-  // Reset check flag when session changes
-  useEffect(() => {
-    hasCheckedRef.current = false
-  }, [sessionKey])
 }

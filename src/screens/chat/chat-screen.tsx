@@ -23,6 +23,10 @@ import {
   createOptimisticMessage,
   createResponseWaitSnapshot,
   isTerminalActiveRunStatus,
+  createPendingNewChatModelKey,
+  resolveSessionModel,
+  resolveSelectedModelProvider,
+  shouldBlockUnresolvedModelSelection,
   shouldClearWaitingForAssistantMessage
 } from './chat-screen-utils'
 import {
@@ -54,6 +58,7 @@ import { useRealtimeChatHistory } from './hooks/use-realtime-chat-history'
 import { snapshotOptimisticUserMessages } from './hooks/optimistic-message-reinject'
 import { useSmoothStreamingText } from './hooks/use-smooth-streaming-text'
 import { useStreamingMessage } from './hooks/use-streaming-message'
+import { requestStopActiveSend } from './stop-active-send'
 import { useActiveRunCheck } from './hooks/use-active-run-check'
 import { useChatMobile } from './hooks/use-chat-mobile'
 import { useChatSessions } from './hooks/use-chat-sessions'
@@ -533,7 +538,9 @@ export function ChatScreen({
     sessionKey: string
     friendlyId: string
     clientId: string
+    requestId: string
   } | null>(null)
+  const stopPendingSessionsRef = useRef(new Set<string>())
   const [fileExplorerCollapsed, setFileExplorerCollapsed] = useState(() => {
     if (typeof window === 'undefined') return true
     const stored = localStorage.getItem('claude-file-explorer-collapsed')
@@ -1058,7 +1065,26 @@ export function ChatScreen({
   }, [modelsQuery.data])
 
   const gatewayModel = currentModelQuery.data || ''
-  const currentModel = _localModelOverride || gatewayModel
+  const [pendingNewChatKey] = useState(() =>
+    createPendingNewChatModelKey(crypto.randomUUID()),
+  )
+  useEffect(() => {
+    if (!isNewChat) return
+    return () => useSessionModelStore.getState().clearModel(pendingNewChatKey)
+  }, [isNewChat, pendingNewChatKey])
+  const modelChoiceKey = isNewChat
+    ? pendingNewChatKey
+    : forcedSessionKey || resolvedSessionKey || activeCanonicalKey || activeSessionKey
+  const sessionModelChoices = useSessionModelStore((state) => state.models)
+  const currentModel = resolveSessionModel(
+    modelChoiceKey,
+    _localModelOverride || gatewayModel,
+    sessionModelChoices,
+  )
+  const currentModelProvider = resolveSelectedModelProvider(
+    currentModel,
+    modelsQuery.data?.models || [],
+  )
 
   // Ref so sendMessage can always read latest thinkingLevel without being in deps
   const thinkingLevelRef = useRef<ThinkingLevel>(thinkingLevel)
@@ -1140,11 +1166,16 @@ export function ChatScreen({
       }) => {
         const activeSend = activeSendRef.current
         if (activeSend) {
+          useChatStore.getState().clearSessionWaitingIfRequestId(
+            activeSend.sessionKey,
+            activeSend.requestId,
+          )
           activeSendRef.current = {
             ...activeSend,
             sessionKey,
             friendlyId,
           }
+          useChatStore.getState().setSessionWaiting(sessionKey, undefined, activeSend.requestId)
         }
         if (
           sessionKey === activeFriendlyId &&
@@ -1278,15 +1309,9 @@ export function ChatScreen({
     handoffTimeoutMs: modelsQuery.data?.streamHandoffTimeoutMs,
   })
 
-  // Cancel any in-flight stream when the user navigates between sessions or
-  // starts a new chat. Without this, an SSE stream from session A keeps
-  // running after the user navigates away — and any chunks it had already
-  // buffered before our abort takes effect could land in session B (the
-  // newly active session). See #297 (cross-session response contamination).
-  // Note: useStreamingMessage also has its own generation-token guard for
-  // the buffered-chunk race, but cancelling here is the cleaner contract
-  // (an in-flight response that the user navigated away from is no longer
-  // wanted in either session).
+  // Navigation detaches the browser reader; the server finishes and persists
+  // that session's response. Clear this view's send marker and discard any
+  // buffered A events before rendering B (cross-session isolation, #297).
   const navCancelKeyRef = useRef<string | null>(null)
   useEffect(() => {
     const navKey = `${activeCanonicalKey ?? ''}::${isNewChat ? 'new' : activeFriendlyId}`
@@ -1308,10 +1333,17 @@ export function ChatScreen({
         return
       }
 
-      // Genuine navigation away: drop the in-flight marker so a stale ref
-      // (accepted-stream handoff skips onAbort) can't suppress a later cancel.
+      // Genuine navigation away: the old answer belongs to A, not this view.
+      if (activeSend) {
+        useChatStore.getState().clearSessionWaitingIfRequestId(
+          activeSend.sessionKey,
+          activeSend.requestId,
+        )
+      }
       activeSendRef.current = null
       cancelStreaming()
+      setSending(false)
+      setPendingGeneration(false)
     }
   }, [activeCanonicalKey, activeFriendlyId, isNewChat, cancelStreaming])
 
@@ -1984,6 +2016,7 @@ export function ChatScreen({
         )
       }
 
+      const sendRequestId = optimisticClientId || crypto.randomUUID()
       setPendingGeneration(true)
       setSending(true)
       setError(null)
@@ -1993,7 +2026,9 @@ export function ChatScreen({
         sessionKey,
         friendlyId,
         clientId: optimisticClientId,
+        requestId: sendRequestId,
       }
+      useChatStore.getState().setSessionWaiting(sessionKey, null, sendRequestId)
 
       // Failsafe: clear waitingForResponse after 120s no matter what
       // Prevents infinite spinner if SSE/idle detection both fail
@@ -2061,7 +2096,8 @@ export function ChatScreen({
           currentThinkingLevel === 'off' ? undefined : currentThinkingLevel,
         fastMode,
         model: currentModel || undefined,
-        idempotencyKey: optimisticClientId || crypto.randomUUID(),
+        provider: currentModelProvider,
+        idempotencyKey: sendRequestId,
       }).catch((err: unknown) => {
         const messageText = err instanceof Error ? err.message : String(err)
         if (import.meta.env.DEV) {
@@ -2078,6 +2114,7 @@ export function ChatScreen({
       streamFinish,
       streamStart,
       currentModel,
+      currentModelProvider,
     ],
   )
 
@@ -2441,6 +2478,15 @@ export function ChatScreen({
       if (trimmedBody.length === 0 && attachments.length === 0) return
       if (attachments.length === 0 && handleUiSlashCommand(trimmedBody)) return
 
+      if (shouldBlockUnresolvedModelSelection(
+        useSessionModelStore.getState().getModel(modelChoiceKey),
+        currentModel,
+        modelsQuery.data?.models || [],
+      )) {
+        showErrorToast('Selected model is unavailable in the current catalog. No message was sent. Reopen the model picker and try again.')
+        return
+      }
+
       // Deduplicate sends with identical content within a 500ms window.
       // This prevents double-fire from paste events that trigger multiple send paths.
       const sendKey = `${trimmedBody}|${attachments.map((a) => `${a.name}:${a.size}`).join(',')}`
@@ -2473,6 +2519,12 @@ export function ChatScreen({
         // In portable mode, use 'main' — no server-side sessions exist.
         // In enhanced mode, create a UUID thread for the sessions API.
         const threadId = isPortableMode ? 'main' : crypto.randomUUID()
+        const pendingModels = useSessionModelStore.getState()
+        const pendingModel = pendingModels.getModel(pendingNewChatKey)
+        if (pendingModel) {
+          pendingModels.setModel(threadId, pendingModel)
+          pendingModels.clearModel(pendingNewChatKey)
+        }
         const { optimisticMessage } = createOptimisticMessage(
           trimmedBody,
           attachmentPayload,
@@ -2529,7 +2581,12 @@ export function ChatScreen({
     },
     [
       activeFriendlyId,
+      activeCanonicalKey,
       activeSessionKey,
+      currentModel,
+      modelChoiceKey,
+      pendingNewChatKey,
+      modelsQuery.data?.models,
       createSessionForMessage,
       forcedSessionKey,
       isNewChat,
@@ -2546,22 +2603,49 @@ export function ChatScreen({
 
   const handleAbortStreaming = useCallback(() => {
     const activeSend = activeSendRef.current
-    if (activeSend?.clientId) {
-      updateHistoryMessageByClientIdEverywhere(
-        queryClient,
-        activeSend.clientId,
-        (message) => ({
-          ...message,
-          status: 'sent',
-        }),
-      )
+    const sessionKey = activeSend ? activeSend.sessionKey : resolvedSessionKey || ''
+    if (stopPendingSessionsRef.current.has(sessionKey)) return
+    const waitingMeta = sessionKey ? useChatStore.getState().waitingSessionMeta[sessionKey] : null
+    const requestId = activeSend?.requestId || waitingMeta?.runId || waitingMeta?.requestId
+    if (!sessionKey || !requestId) {
+      toast('Could not identify the active run to stop', { type: 'error' })
+      return
     }
-    activeSendRef.current = null
-    cancelStreaming()
-    setSending(false)
-    setPendingGeneration(false)
-    setWaitingForResponse(false)
-  }, [cancelStreaming, queryClient])
+    stopPendingSessionsRef.current.add(sessionKey)
+    void requestStopActiveSend(sessionKey, requestId)
+      .then(() => {
+        // A Stop response can arrive after the user has switched to B.
+        // Never clear B's view or detach B's newer stream.
+        if (sessionKeyForWaiting.current !== sessionKey) return
+        const currentSend = activeSendRef.current
+        if (currentSend && currentSend.requestId !== activeSend?.requestId) return
+        const waitingMetaBySession = useChatStore.getState().waitingSessionMeta
+        const currentWaiting = waitingMetaBySession[sessionKey]
+        if (Object.hasOwn(waitingMetaBySession, sessionKey) &&
+          (currentWaiting.requestId !== waitingMeta?.requestId ||
+            currentWaiting.runId !== waitingMeta?.runId)) return
+        if (activeSend?.clientId) {
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({ ...message, status: 'sent' }),
+          )
+        }
+        if (activeSend && activeSendRef.current?.clientId === activeSend.clientId) {
+          activeSendRef.current = null
+          cancelStreaming()
+        }
+        setSending(false)
+        setPendingGeneration(false)
+        setWaitingForResponse(false)
+        refreshHistoryRef.current()
+      })
+      .catch((err: unknown) => {
+        const detail = err instanceof Error ? err.message : String(err)
+        toast(`Could not stop this run: ${detail}`, { type: 'error' })
+      })
+      .finally(() => { stopPendingSessionsRef.current.delete(sessionKey) })
+  }, [cancelStreaming, queryClient, resolvedSessionKey, setWaitingForResponse])
 
   const runPaletteSlashCommand = useCallback(
     (command: string) => {
@@ -2926,6 +3010,7 @@ export function ChatScreen({
                     activeCanonicalKey ||
                     activeSessionKey
               }
+              modelSessionKey={isNewChat ? pendingNewChatKey : undefined}
               wrapperRef={composerRef}
               composerRef={composerHandleRef}
               embedded={embedded}

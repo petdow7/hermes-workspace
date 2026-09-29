@@ -17,8 +17,14 @@ Log "=== Hermes Workspace Launcher starting at " & Now & " ==="
 
 ' Dashboard is normally started by Hermes Desktop. Start it asynchronously as a
 ' fallback, but do not wait for its build or run a blocking netstat probe.
-RunHidden q & hermesPath & q & " dashboard --port 9119 --host 127.0.0.1 --no-open"
-Log "Dashboard launch requested on port 9119"
+' Any argument (the Workspace watchdog passes /workspace-only) skips Dashboard,
+' which has its own watchdog. The login shim passes no argument.
+If WScript.Arguments.Count = 0 Then
+    RunHidden q & hermesPath & q & " dashboard --port 9119 --host 127.0.0.1 --no-open"
+    Log "Dashboard launch requested on port 9119"
+Else
+    Log "Workspace-only mode: Dashboard launch skipped"
+End If
 
 ' Start Workspace independently. Vite enforces port 3000 in vite.config.ts.
 ' Direct WScript.Shell execution avoids nested cmd.exe quoting failures.
